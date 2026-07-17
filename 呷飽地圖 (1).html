@@ -244,7 +244,7 @@
   .leaflet-popup-content{font-family:'Noto Sans TC',sans-serif; font-size:13px;}
 
   @media (max-width: 760px){
-    .sidebar{position:absolute; z-index:400; height:100%; box-shadow:4px 0 16px rgba(0,0,0,0.15);}
+    .sidebar{position:absolute; z-index:400; height:100%; box-shadow:4px 0 16px rgba(0,0,0,0.15); transition: transform 0.3s ease;}
     .sidebar.hide-mobile{transform:translateX(-100%);}
     #map{width:100%;}
     .drawer{width:100vw; max-width:100vw; right:-100vw;}
@@ -326,7 +326,7 @@
   </div>
 </div>
 
-<!-- ============ MANUAL ADD MODAL (reuse drawer style, simple) ============ -->
+<!-- ============ MANUAL ADD MODAL ============ -->
 <div class="drawer-overlay" id="manual-overlay"></div>
 <div class="drawer" id="manual-drawer">
   <div class="drawer-head">
@@ -392,7 +392,7 @@
     </div>
 
     <div class="private-note">
-      <div class="pn-label">🔒 我的私人備註(只有你看得到,不會分享)</div>
+      <div class="pn-label">🔒 我的私人備註(只有你看 tender, 不會分享)</div>
       <textarea class="field-textarea" id="my-private-note" placeholder="例如:記得點小辣、要提前訂位..."></textarea>
     </div>
   </div>
@@ -407,34 +407,34 @@
 <script>
 (function(){
 
-const TAGS = ['必吃招牌','環境佳','有停車位','CP值高','適合約會','適合聚餐','外帶方便','服務好'];
+const TAGS = ['必吃招招牌','環境佳','有停車位','CP值高','適合約會','適合聚餐','外帶方便','服務好'];
 
 let state = {
   nickname: '',
   groupCode: null,
   groupName: '',
-  places: [],       // {id,name,address,lat,lng,addedBy}
-  reviews: {},       // placeId -> [{user,stars,text,tags,photo,date}]
+  places: [],       
+  reviews: {},       
   activePlaceId: null,
   map: null,
-  markers: {},       // placeId -> leaflet marker
+  markers: {},       
   manualPickMode: false,
   manualPickedLatLng: null,
   refreshTimer: null
 };
 
-// ---------- storage helpers ----------
-async function sGet(key, shared){
-  try{
-    const r = await window.storage.get(key, !!shared);
-    return r ? JSON.parse(r.value) : null;
-  }catch(e){ return null; }
+// ---------- 改用所有瀏覽器都支援的標準 localStorage ----------
+async function sGet(key) {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? { value: val } : null;
+  } catch(e) { return null; }
 }
-async function sSet(key, value, shared){
-  try{
-    await window.storage.set(key, JSON.stringify(value), !!shared);
+async function sSet(key, value) {
+  try {
+    localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
     return true;
-  }catch(e){ console.error('storage set failed', e); return false; }
+  } catch(e) { console.error('storage set failed', e); return false; }
 }
 
 function toast(msg){
@@ -460,7 +460,8 @@ function todayStr(){
 
 // ---------- onboarding ----------
 async function initOnboarding(){
-  const profile = await sGet('me:profile', false);
+  const res = await sGet('me:profile');
+  const profile = res ? JSON.parse(res.value) : null;
   if(profile){
     if(profile.nickname) document.getElementById('nickname-input').value = profile.nickname;
     if(profile.groups && profile.groups.length){
@@ -488,9 +489,9 @@ async function initOnboarding(){
     if(!gname){ showOnboardErr('請輸入群組名稱'); return; }
     state.nickname = nick;
     const code = genCode();
-    await sSet(`group:${code}:meta`, {code, name: gname, createdAt: Date.now(), createdBy: nick}, true);
-    await sSet(`group:${code}:places`, [], true);
-    await sSet(`group:${code}:reviews`, {}, true);
+    await sSet(`group:${code}:meta`, JSON.stringify({code, name: gname, createdAt: Date.now(), createdBy: nick}));
+    await sSet(`group:${code}:places`, JSON.stringify([]));
+    await sSet(`group:${code}:reviews`, JSON.stringify({}));
     await saveProfile(nick, code, gname);
     enterGroup(code);
   };
@@ -501,7 +502,8 @@ async function initOnboarding(){
     if(!nick){ showOnboardErr('請先輸入你的暱稱'); return; }
     if(!code){ showOnboardErr('請輸入群組代碼'); return; }
     state.nickname = nick;
-    const meta = await sGet(`group:${code}:meta`, true);
+    const metaRes = await sGet(`group:${code}:meta`);
+    const meta = metaRes ? JSON.parse(metaRes.value) : null;
     if(!meta){ showOnboardErr('找不到這個群組代碼,請確認是否輸入正確'); return; }
     await saveProfile(nick, code, meta.name);
     enterGroup(code);
@@ -513,16 +515,18 @@ function showOnboardErr(msg){
   el.style.display = 'block';
 }
 async function saveProfile(nick, code, name){
-  let profile = await sGet('me:profile', false);
+  const res = await sGet('me:profile');
+  let profile = res ? JSON.parse(res.value) : null;
   if(!profile) profile = {nickname:nick, groups:[]};
   profile.nickname = nick;
   profile.groups = (profile.groups||[]).filter(g=>g.code!==code);
   profile.groups.push({code, name});
-  await sSet('me:profile', profile, false);
+  await sSet('me:profile', JSON.stringify(profile));
 }
 
 async function enterGroup(code){
-  const meta = await sGet(`group:${code}:meta`, true);
+  const metaRes = await sGet(`group:${code}:meta`);
+  const meta = metaRes ? JSON.parse(metaRes.value) : null;
   if(!meta){ showOnboardErr('找不到這個群組代碼'); return; }
   state.groupCode = code;
   state.groupName = meta.name;
@@ -551,7 +555,8 @@ function buildTagPicker(){
 
 // ---------- map ----------
 function initMap(){
-  state.map = L.map('map').setView([25.0478, 121.5319], 13); // default Taipei
+  if(state.map) return;
+  state.map = L.map('map').setView([25.0478, 121.5319], 13); 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19
@@ -594,17 +599,17 @@ function refreshMarkers(){
     state.markers[p.id] = marker;
     bounds.push([p.lat, p.lng]);
   });
-  if(bounds.length){
+  if(bounds.length && state.map){
     try{ state.map.fitBounds(bounds, {padding:[40,40], maxZoom:16}); }catch(e){}
   }
 }
 
 // ---------- data load / render ----------
 async function loadGroupData(){
-  const places = await sGet(`group:${state.groupCode}:places`, true);
-  const reviews = await sGet(`group:${state.groupCode}:reviews`, true);
-  state.places = places || [];
-  state.reviews = reviews || {};
+  const pRes = await sGet(`group:${state.groupCode}:places`);
+  const rRes = await sGet(`group:${state.groupCode}:reviews`);
+  state.places = pRes ? JSON.parse(pRes.value) : [];
+  state.reviews = rRes ? JSON.parse(rRes.value) : {};
   renderPlaceList();
   refreshMarkers();
   if(state.activePlaceId) renderDetail(state.activePlaceId);
@@ -646,7 +651,7 @@ async function openDetail(placeId){
   renderPlaceList();
   const p = state.places.find(x=>x.id===placeId);
   if(!p) return;
-  if(state.markers[placeId]) state.map.panTo(state.markers[placeId].getLatLng());
+  if(state.markers[placeId] && state.map) state.map.panTo(state.markers[placeId].getLatLng());
   await renderDetail(placeId);
   document.getElementById('detail-overlay').classList.add('show');
   document.getElementById('detail-drawer').classList.add('open');
@@ -697,7 +702,8 @@ async function renderDetail(placeId){
   window._pendingPhoto = mine ? (mine.photo||null) : null;
 
   // private note
-  const note = await sGet(`me:note:${state.groupCode}:${placeId}`, false);
+  const nRes = await sGet(`me:note:${state.groupCode}:${placeId}`);
+  const note = nRes ? JSON.parse(nRes.value) : null;
   document.getElementById('my-private-note').value = note ? note.text : '';
 }
 
@@ -762,7 +768,7 @@ async function addPlaceFromSearch(d){
 
 async function addPlace(place){
   state.places.push(place);
-  await sSet(`group:${state.groupCode}:places`, state.places, true);
+  await sSet(`group:${state.groupCode}:places`, JSON.stringify(state.places));
   renderPlaceList();
   refreshMarkers();
   toast(`已新增「${place.name}」`);
@@ -771,7 +777,7 @@ async function addPlace(place){
 
 // ---------- manual add ----------
 function initManualAdd(){
-  document.getElementById('manual-add-btn').onclick = ()=>{
+  document.getElementById('manual-add-btn').onclick = () => {
     document.getElementById('manual-name').value = '';
     document.getElementById('manual-address').value = '';
     document.getElementById('manual-pick-status').textContent = '';
@@ -801,7 +807,7 @@ function initManualAdd(){
         if(data.length){ lat=parseFloat(data[0].lat); lng=parseFloat(data[0].lon); }
       }catch(e){}
     }
-    if(lat===null){
+    if(lat===null && state.map){
       const c = state.map.getCenter();
       lat = c.lat; lng = c.lng;
     }
@@ -857,8 +863,8 @@ function initReviewForm(){
     revs = revs.filter(r=>r.user !== state.nickname);
     revs.push({user: state.nickname, stars, text, tags, photo, date: Date.now(), dateStr: todayStr()});
     state.reviews[placeId] = revs;
-    await sSet(`group:${state.groupCode}:reviews`, state.reviews, true);
-    await sSet(`me:note:${state.groupCode}:${placeId}`, {text: privateNote}, false);
+    await sSet(`group:${state.groupCode}:reviews`, JSON.stringify(state.reviews));
+    await sSet(`me:note:${state.groupCode}:${placeId}`, JSON.stringify({text: privateNote}));
 
     renderPlaceList();
     refreshMarkers();
